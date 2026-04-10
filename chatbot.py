@@ -6,6 +6,7 @@ import requests
 import base64
 import os
 import io
+import csv
 
 # ---------- LOAD ENV ----------
 load_dotenv()
@@ -16,11 +17,59 @@ if not GROQ_KEY:
     st.stop()
 
 # ---------- PAGE CONFIG ----------
-st.set_page_config(page_title="Rebin's QA Chatbot", page_icon="🧪")
-st.markdown("<h2 style='text-align:center;'>🧪 Rebin's QA Chatbot</h2>", unsafe_allow_html=True)
-st.markdown("<p style='text-align:center; color:gray;'>Upload Screenshots, PDFs, Docs → Get Test Cases instantly 🚀</p>", unsafe_allow_html=True)
+st.set_page_config(
+    page_title="Rebin's QA Test Assistant Bot",
+    page_icon="🧪",
+    layout="wide"
+)
 
-# ---------- SESSION STATE INIT ----------
+st.markdown("""
+<style>
+    .main-header {
+        background: linear-gradient(90deg, #1a1a2e, #16213e, #0f3460);
+        padding: 20px; border-radius: 10px;
+        text-align: center; margin-bottom: 20px;
+    }
+    .main-header h1 { color: #e94560; font-size: 2rem; margin: 0; }
+    .main-header p { color: #a8b2d8; margin: 5px 0 0 0; }
+    .metric-card {
+        background: #f8f9fa; border-radius: 8px;
+        padding: 16px; text-align: center;
+        border: 1px solid #e0e0e0;
+    }
+    .metric-num { font-size: 32px; font-weight: 700; }
+    .metric-lbl { font-size: 13px; color: #666; margin-top: 4px; }
+    .badge-high { background:#ffe0e0; color:#c00;
+        padding:2px 8px; border-radius:99px; font-size:11px; }
+    .badge-med { background:#fff3cd; color:#856404;
+        padding:2px 8px; border-radius:99px; font-size:11px; }
+    .badge-low { background:#d4edda; color:#155724;
+        padding:2px 8px; border-radius:99px; font-size:11px; }
+    .badge-pos { background:#d1f5ea; color:#0f6e56;
+        padding:2px 8px; border-radius:99px; font-size:11px; }
+    .badge-neg { background:#fde8e8; color:#a32d2d;
+        padding:2px 8px; border-radius:99px; font-size:11px; }
+    .ai-suggestion {
+        background: #e8f4fd; border-left: 4px solid #185FA5;
+        padding: 10px 14px; border-radius: 0 8px 8px 0;
+        font-size: 14px; margin: 8px 0;
+    }
+    .duplicate-alert {
+        background: #fff3cd; border-left: 4px solid #ffc107;
+        padding: 10px 14px; border-radius: 0 8px 8px 0;
+        font-size: 14px; margin: 8px 0;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<div class="main-header">
+    <h1>🧪 Rebin's QA Test Assistant Bot</h1>
+    <p>AI-Powered Test Case Generator | Selenium Code | Coverage Analyzer</p>
+</div>
+""", unsafe_allow_html=True)
+
+# ---------- SESSION STATE ----------
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "images" not in st.session_state:
@@ -29,98 +78,16 @@ if "file_text" not in st.session_state:
     st.session_state.file_text = ""
 if "prev_file_names" not in st.session_state:
     st.session_state.prev_file_names = []
-
-# ---------- SIDEBAR ----------
-st.sidebar.header("📂 Upload Files")
-st.sidebar.markdown("*Supports: Screenshots, PDFs, TXT*")
-
-uploaded_files = st.sidebar.file_uploader(
-    "Upload files",
-    type=["txt", "pdf", "png", "jpg", "jpeg", "webp"],
-    accept_multiple_files=True
-)
-
-# ---------- QUICK PROMPT BUTTONS ----------
-st.sidebar.markdown("---")
-st.sidebar.markdown("**⚡ Quick Prompts**")
-
-quick_prompt = None
-if st.sidebar.button("📋 Generate Test Cases"):
-    quick_prompt = "Analyze the uploaded screenshot/document and generate detailed test cases in proper format with Test ID, Description, Steps, Expected Result and Priority."
-if st.sidebar.button("🐛 Find Bug Scenarios"):
-    quick_prompt = "Based on the uploaded content, identify all possible bug scenarios and edge cases a QA should test."
-if st.sidebar.button("✅ Smoke Test Cases"):
-    quick_prompt = "Generate smoke test cases for the uploaded content covering only the critical functionality."
-if st.sidebar.button("🔁 Regression Test Cases"):
-    quick_prompt = "Generate a full regression test suite based on the uploaded screenshots or documents."
-if st.sidebar.button("📝 Write BDD Scenarios"):
-    quick_prompt = "Convert the uploaded content into BDD test scenarios using Given/When/Then format."
-
-# ---------- CLEAR BUTTON ----------
-st.sidebar.markdown("---")
-if st.sidebar.button("🗑️ Clear Chat & Files"):
-    st.session_state.chat_history = []
-    st.session_state.images = []
-    st.session_state.file_text = ""
-    st.session_state.prev_file_names = []
-    st.rerun()
-
-# ---------- DETECT NEW FILES & RESET ----------
-current_file_names = [f.name for f in uploaded_files] if uploaded_files else []
-
-if current_file_names != st.session_state.prev_file_names:
-    st.session_state.chat_history = []
-    st.session_state.images = []
-    st.session_state.file_text = ""
-    st.session_state.prev_file_names = current_file_names
-
-    if uploaded_files:
-        all_text = ""
-        for file in uploaded_files:
-            if file.type == "text/plain":
-                all_text += f"=== FILE: {file.name} ===\n"
-                all_text += file.read().decode("utf-8") + "\n\n"
-
-            elif file.type == "application/pdf":
-                try:
-                    all_text += f"=== PDF: {file.name} ===\n"
-                    pdf_reader = PyPDF2.PdfReader(file)
-                    for page in pdf_reader.pages:
-                        text = page.extract_text()
-                        if text:
-                            all_text += text + "\n\n"
-                except Exception as e:
-                    st.sidebar.error(f"❌ Error reading {file.name}: {e}")
-
-            elif file.type in ["image/png", "image/jpg", "image/jpeg", "image/webp"]:
-                image = Image.open(file)
-                st.sidebar.image(image, caption=file.name, use_column_width=True)
-                st.session_state.images.append(image)
-
-        st.session_state.file_text = all_text.strip()
-
-        if st.session_state.file_text:
-            st.sidebar.success("✅ Document(s) loaded!")
-        if st.session_state.images:
-            st.sidebar.success(f"✅ {len(st.session_state.images)} screenshot(s) loaded!")
-
-st.divider()
-
-# ---------- STATUS ----------
-col1, col2 = st.columns(2)
-if st.session_state.file_text:
-    col1.info("📄 Document loaded")
-if st.session_state.images:
-    col2.info(f"🖼️ {len(st.session_state.images)} screenshot(s) loaded")
-
-# ---------- DISPLAY CHAT ----------
-for msg in st.session_state.chat_history:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+if "last_test_cases" not in st.session_state:
+    st.session_state.last_test_cases = []
+if "last_ac" not in st.session_state:
+    st.session_state.last_ac = ""
+if "dashboard_data" not in st.session_state:
+    st.session_state.dashboard_data = None
 
 
 # ===============================
-# 🔧 HELPER: image to base64
+# 🔧 HELPERS
 # ===============================
 def image_to_base64(image: Image.Image) -> str:
     image = image.convert("RGB")
@@ -130,15 +97,11 @@ def image_to_base64(image: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode("utf-8")
 
 
-# ===============================
-# 🤖 GROQ API CALL
-# ===============================
 def call_groq(messages: list, images: list = None) -> str:
     headers = {
         "Authorization": f"Bearer {GROQ_KEY}",
         "Content-Type": "application/json",
     }
-
     if images:
         model = "meta-llama/llama-4-scout-17b-16e-instruct"
         api_messages = []
@@ -149,7 +112,9 @@ def call_groq(messages: list, images: list = None) -> str:
                     b64 = image_to_base64(img)
                     content.append({
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{b64}"
+                        }
                     })
                 api_messages.append({"role": "user", "content": content})
             else:
@@ -161,16 +126,13 @@ def call_groq(messages: list, images: list = None) -> str:
     payload = {
         "model": model,
         "messages": api_messages,
-        "max_tokens": 2048,
+        "max_tokens": 4096,
         "temperature": 0.3,
     }
-
     try:
         response = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=30,
+            headers=headers, json=payload, timeout=60,
         )
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
@@ -183,93 +145,948 @@ def call_groq(messages: list, images: list = None) -> str:
 
 
 # ===============================
-# 💬 CHAT INPUT
+# 📊 DASHBOARD FUNCTIONS
 # ===============================
-user_prompt = st.chat_input("e.g. Generate test cases for this screenshot...")
-
-# Use quick prompt if sidebar button was clicked
-active_prompt = quick_prompt or user_prompt
-
-if active_prompt:
-
-    with st.chat_message("user"):
-        st.markdown(active_prompt)
-    st.session_state.chat_history.append({"role": "user", "content": active_prompt})
-
-    # Detect if question is about image
-    image_keywords = [
-        "image", "photo", "picture", "screenshot", "screen", "this",
-        "what is", "what's", "describe", "show", "see", "look",
-        "identify", "tell me about", "what do you see", "whats in",
-        "test case", "generate", "analyze", "analyse", "ui", "button",
-        "form", "field", "page", "login", "bug", "scenario", "bdd",
-        "smoke", "regression", "find", "check"
+def compute_dashboard(test_cases: list, ac_text: str) -> dict:
+    total = len(test_cases)
+    positive = sum(
+        1 for tc in test_cases
+        if "should be able to" in tc.get(
+            "Steps to Reproduce", "").lower()
+        and "should not" not in tc.get(
+            "Steps to Reproduce", "").lower()
+    )
+    negative = sum(
+        1 for tc in test_cases
+        if "should not be able to" in tc.get(
+            "Steps to Reproduce", "").lower()
+    )
+    unique_titles = list(dict.fromkeys(
+        tc["Test Case Title"] for tc in test_cases
+        if tc.get("Test Case Title")
+    ))
+    high = sum(1 for t in unique_titles if len(t) > 30)
+    med = max(0, len(unique_titles) - high)
+    steps = [
+        tc.get("Steps to Reproduce", "").lower().strip()
+        for tc in test_cases
     ]
-    use_image = (
-        st.session_state.images and
-        any(word in active_prompt.lower() for word in image_keywords)
+    duplicates = len(steps) - len(set(steps))
+    ac_lines = [
+        l.strip() for l in ac_text.split("\n")
+        if l.strip() and len(l.strip()) > 10
+    ]
+    covered = 0
+    for ac_line in ac_lines:
+        keywords = [
+            w for w in ac_line.lower().split()
+            if len(w) > 4
+        ][:3]
+        for tc in test_cases:
+            tc_text = (
+                tc.get("Steps to Reproduce", "") +
+                tc.get("Test Case Title", "")
+            ).lower()
+            if any(kw in tc_text for kw in keywords):
+                covered += 1
+                break
+    coverage_pct = int(
+        (covered / max(len(ac_lines), 1)) * 100
+    )
+    return {
+        "total": total,
+        "positive": positive,
+        "negative": negative,
+        "unique_tcs": len(unique_titles),
+        "high": high,
+        "med": med,
+        "coverage_pct": coverage_pct,
+        "duplicates": duplicates,
+        "unique_titles": unique_titles[:5]
+    }
+
+
+def generate_suggestions(data: dict) -> list:
+    suggestions = []
+    if data['negative'] == 0:
+        suggestions.append(
+            "⚠️ No negative test cases found. "
+            "Add error handling and invalid input scenarios.")
+    if data['coverage_pct'] < 80:
+        suggestions.append(
+            f"⚠️ Coverage is {data['coverage_pct']}%. "
+            "Some AC points may not be covered. "
+            "Review and add missing scenarios.")
+    if data['total'] < 5:
+        suggestions.append(
+            "💡 Only a few steps generated. "
+            "Consider adding more edge case scenarios.")
+    if not suggestions:
+        suggestions.append(
+            "✅ Great coverage! All positive and negative "
+            "scenarios are well covered. "
+            "Test suite looks comprehensive.")
+    return suggestions
+
+
+def show_dashboard(data: dict, feature: str):
+    st.markdown("---")
+    st.markdown(f"### 📊 Live Dashboard — *{feature}*")
+
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-num" style="color:#185FA5">
+                {data['unique_tcs']}
+            </div>
+            <div class="metric-lbl">Total Test Cases</div>
+        </div>""", unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-num" style="color:#3B6D11">
+                {data['positive']}
+            </div>
+            <div class="metric-lbl">Positive Steps</div>
+        </div>""", unsafe_allow_html=True)
+    with c3:
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-num" style="color:#A32D2D">
+                {data['negative']}
+            </div>
+            <div class="metric-lbl">Negative Steps</div>
+        </div>""", unsafe_allow_html=True)
+    with c4:
+        color = (
+            "#3B6D11" if data['coverage_pct'] >= 80
+            else "#854F0B" if data['coverage_pct'] >= 50
+            else "#A32D2D"
+        )
+        st.markdown(f"""
+        <div class="metric-card">
+            <div class="metric-num" style="color:{color}">
+                {data['coverage_pct']}%
+            </div>
+            <div class="metric-lbl">AC Coverage</div>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.markdown("#### 🎯 Coverage Breakdown")
+        pos_pct = int(
+            (data['positive'] / max(data['total'], 1)) * 100
+        )
+        neg_pct = int(
+            (data['negative'] / max(data['total'], 1)) * 100
+        )
+        st.markdown(f"**Positive cases** — {pos_pct}%")
+        st.progress(pos_pct / 100)
+        st.markdown(f"**Negative cases** — {neg_pct}%")
+        st.progress(neg_pct / 100)
+        st.markdown(f"**AC Coverage** — {data['coverage_pct']}%")
+        st.progress(data['coverage_pct'] / 100)
+        st.markdown("#### 🏷️ Priority Distribution")
+        p1, p2 = st.columns(2)
+        with p1:
+            st.markdown(
+                f'<span class="badge-high">'
+                f'🔴 High: {data["high"]}</span>',
+                unsafe_allow_html=True)
+        with p2:
+            st.markdown(
+                f'<span class="badge-med">'
+                f'🟡 Medium: {data["med"]}</span>',
+                unsafe_allow_html=True)
+
+    with col_right:
+        st.markdown("#### 🔍 AI Duplicate Detector")
+        if data['duplicates'] == 0:
+            st.markdown("""
+            <div class="ai-suggestion">
+                ✅ No duplicate test cases found.
+                All test cases cover unique scenarios.
+            </div>""", unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div class="duplicate-alert">
+                ⚠️ {data['duplicates']} potential duplicate(s) detected.
+                Review and consolidate for cleaner test suite.
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown("#### 💡 AI Smart Suggestions")
+        for s in generate_suggestions(data):
+            st.markdown(
+                f'<div class="ai-suggestion">{s}</div>',
+                unsafe_allow_html=True)
+
+    st.markdown("#### 📋 Test Cases Generated")
+    for i, title in enumerate(data['unique_titles'], 1):
+        ptype = "neg" if "not" in title.lower() else "pos"
+        label = "Negative" if ptype == "neg" else "Positive"
+        st.markdown(
+            f'{i}. <span class="badge-{ptype}">{label}</span> {title}',
+            unsafe_allow_html=True)
+
+
+# ===============================
+# 📋 PROMPT TEMPLATES
+# ===============================
+def get_testcase_prompt(
+        ac_text: str, feature_name: str = "Feature") -> str:
+    return f"""Act as a Technical Test Lead and think about every \
+possible test case for the below Requirement.
+
+Feature: {feature_name}
+
+Requirement / Acceptance Criteria:
+{ac_text}
+
+MANDATORY RULE — EVERY SINGLE TEST CASE must start with \
+these EXACT 7 login steps (copy them word for word):
+
+MANDATORY STEPS (same for ALL test cases):
+Launch the following url "https://t1-aeg-qa-a.eluxmkt.com/der/de/b2b/pre-login/" | User should be able to launch the url
+User should be able to Partner link from the portal | User is able to Click on the partner link
+User should be able to Redirected to "Prelogin page" after clicking on the partner link from the portal | User is able to View the "Prelogin page"
+User should be able to Able to see "Login now", "Contact us" Buttons | User is able to View the "Login now", "Contact us" Buttons
+User should be able to "Login now" from prelogin page. | User is able to Click on the login now button
+User should be able to Redirected to "SAML login page" when clicking on "Login now" from prelogin page | User is able to User should be redirected to SAML login page
+User should be able to redirect to the Chiron page after the successful login credentials (Chiron user credentials) | User is able to View the login page
+
+AFTER the 7 mandatory steps — add SPECIFIC steps \
+for that test case based on AC.
+
+STRICT LANGUAGE RULES FOR SPECIFIC STEPS:
+POSITIVE:
+- Column 2 MUST start with: "User should be able to..."
+- Column 3 MUST start with: "User is able to..."
+
+NEGATIVE:
+- Column 2 MUST start with: "User should not be able to..."
+- Column 3 MUST start with: "User is not able to..."
+
+COMPLETE EXAMPLE:
+Test Case Title: Verify whether user is able to view \
+"Extended warranty" label for the product in wishlist page
+Launch the following url "https://t1-aeg-qa-a.eluxmkt.com/der/de/b2b/pre-login/" | User should be able to launch the url
+User should be able to Partner link from the portal | User is able to Click on the partner link
+User should be able to Redirected to "Prelogin page" after clicking on the partner link from the portal | User is able to View the "Prelogin page"
+User should be able to Able to see "Login now", "Contact us" Buttons | User is able to View the "Login now", "Contact us" Buttons
+User should be able to "Login now" from prelogin page. | User is able to Click on the login now button
+User should be able to Redirected to "SAML login page" when clicking on "Login now" from prelogin page | User is able to User should be redirected to SAML login page
+User should be able to redirect to the Chiron page after the successful login credentials (Chiron user credentials) | User is able to View the login page
+User should be able to Navigate to Premier Line Sub-menu under Sales&Marketing | User is able to Navigate to Premier Line Sub-menu under Sales&Marketing
+User should be able to Add any Product to wishlist | User is able to Add any Product to wishlist
+User should be able to Navigate to Wishlist page | User is able to Navigate to Wishlist page
+User should be able to view "Extended warranty" label for the product | User is able to view "Extended warranty" label for the product
+
+Test Case Title: Verify whether user is not able to view \
+"Extended warranty" label without adding product to wishlist
+Launch the following url "https://t1-aeg-qa-a.eluxmkt.com/der/de/b2b/pre-login/" | User should be able to launch the url
+User should be able to Partner link from the portal | User is able to Click on the partner link
+User should be able to Redirected to "Prelogin page" after clicking on the partner link from the portal | User is able to View the "Prelogin page"
+User should be able to Able to see "Login now", "Contact us" Buttons | User is able to View the "Login now", "Contact us" Buttons
+User should be able to "Login now" from prelogin page. | User is able to Click on the login now button
+User should be able to Redirected to "SAML login page" when clicking on "Login now" from prelogin page | User is able to User should be redirected to SAML login page
+User should be able to redirect to the Chiron page after the successful login credentials (Chiron user credentials) | User is able to View the login page
+User should be able to Navigate to Wishlist page without adding product | User is able to Navigate to Wishlist page
+User should not be able to view "Extended warranty" label | User is not able to view "Extended warranty" label
+User should be able to see empty wishlist message | User is able to see empty wishlist message
+
+Now generate ALL test cases for the given AC.
+Each test case MUST have ALL 7 mandatory login steps first.
+Then add specific steps for that test case.
+Generate minimum 6-8 test cases (mix positive and negative).
+
+After all test cases provide CSV:
+---CSV START---
+Test Case Title,Steps to Reproduce,Expected Result
+---CSV END---
+
+Rules for CSV:
+- Same Test Case Title repeats for every step of that TC
+- Mandatory steps: exact text as shown
+- Positive specific steps: "User should be able to..." | "User is able to..."
+- Negative specific steps: "User should not be able to..." | "User is not able to..."
+- No extra commas inside cell text"""
+
+
+def get_selenium_prompt(
+        ac_text: str, tc_text: str = "") -> str:
+    return f"""Act as a Senior Selenium Automation Engineer.
+
+Generate complete Selenium Java code using:
+- TestNG framework
+- Page Object Model (POM)
+- WebDriverManager for driver setup
+- TestNG Assert for assertions
+
+Acceptance Criteria:
+{ac_text}
+
+{f"Test Cases context:{chr(10)}{tc_text}" if tc_text else ""}
+
+Generate:
+1. Page Object class with @FindBy WebElements and action methods
+2. TestNG Test class with @BeforeClass @Test @AfterClass
+3. Both positive and negative test methods
+4. Meaningful method names matching test case titles
+5. Login flow included in @BeforeClass or base setup
+6. Comments explaining each section"""
+
+
+def get_screenshot_tc_prompt() -> str:
+    return """Act as a Technical Test Lead. \
+Analyze this UI screenshot carefully.
+
+Identify ALL UI elements visible:
+- Buttons, input fields, dropdowns, checkboxes
+- Labels, text, error messages
+- Navigation items, links, menus
+- Forms, tables
+
+MANDATORY RULE — EVERY test case must start with \
+these EXACT 7 login steps:
+Launch the following url "https://t1-aeg-qa-a.eluxmkt.com/der/de/b2b/pre-login/" | User should be able to launch the url
+User should be able to Partner link from the portal | User is able to Click on the partner link
+User should be able to Redirected to "Prelogin page" after clicking on the partner link from the portal | User is able to View the "Prelogin page"
+User should be able to Able to see "Login now", "Contact us" Buttons | User is able to View the "Login now", "Contact us" Buttons
+User should be able to "Login now" from prelogin page. | User is able to Click on the login now button
+User should be able to Redirected to "SAML login page" when clicking on "Login now" from prelogin page | User is able to User should be redirected to SAML login page
+User should be able to redirect to the Chiron page after the successful login credentials (Chiron user credentials) | User is able to View the login page
+
+Then add specific steps for each test case.
+POSITIVE: "User should be able to..." | "User is able to..."
+NEGATIVE: "User should not be able to..." | "User is not able to..."
+
+Format:
+Test Case Title: [title]
+[Step] | [Expected]
+
+After all test cases provide:
+---CSV START---
+Test Case Title,Steps to Reproduce,Expected Result
+---CSV END---"""
+
+
+def get_bdd_prompt(ac_text: str) -> str:
+    return f"""Act as a BDD Expert. \
+Convert the following AC into Gherkin format.
+
+Acceptance Criteria:
+{ac_text}
+
+Generate scenarios covering positive and negative cases:
+
+Feature: [Feature Name]
+
+  Background:
+    Given user navigates to the pre-login URL
+    And user clicks Partner link
+    And user is redirected to Prelogin page
+    And user clicks Login now
+    And user is redirected to SAML login page
+    And user logs in with Chiron credentials
+
+  Scenario: [Positive scenario]
+    Given [specific precondition]
+    When [action]
+    Then [expected result]
+
+  Scenario: [Negative scenario]
+    Given [specific precondition]
+    When [invalid action]
+    Then [error expected result]"""
+
+
+def get_summary_prompt(
+        test_cases: list, feature: str) -> str:
+    tc_text = "\n".join([
+        f"- {tc['Test Case Title']}: {tc['Steps to Reproduce']}"
+        for tc in test_cases[:20]
+    ])
+    return f"""As a QA Test Lead, write a professional \
+test summary report for:
+
+Feature: {feature}
+Total Test Cases: {len(test_cases)}
+
+Test Cases:
+{tc_text}
+
+Write a professional report with:
+1. Executive Summary (2-3 lines)
+2. Test Scope
+3. Test Approach
+4. Risk Areas Identified
+5. Recommendation
+
+Keep it concise and suitable for QA Manager review."""
+
+
+# ===============================
+# 📊 PARSE & CSV
+# ===============================
+def parse_test_cases_to_list(raw_text: str) -> list:
+    test_cases = []
+
+    # Try CSV section first
+    if "---CSV START---" in raw_text and "---CSV END---" in raw_text:
+        csv_section = raw_text.split(
+            "---CSV START---")[1].split("---CSV END---")[0].strip()
+        lines = csv_section.split("\n")
+        for line in lines[1:]:
+            line = line.strip()
+            if not line:
+                continue
+            reader = csv.reader([line])
+            for parts in reader:
+                if len(parts) >= 3:
+                    test_cases.append({
+                        "Test Case Title": parts[0].strip(),
+                        "Steps to Reproduce": parts[1].strip(),
+                        "Expected Result": parts[2].strip(),
+                        "Actual Result": "",
+                        "Status": "Not Executed"
+                    })
+        if test_cases:
+            return test_cases
+
+    # Fallback parse
+    lines = raw_text.split("\n")
+    current_title = ""
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if (("verify" in line.lower() or
+             "validate" in line.lower() or
+             "test case title:" in line.lower())
+                and "|" not in line and len(line) > 15):
+            current_title = line.replace(
+                "Test Case Title:", "").strip("*#-_ :")
+        elif "|" in line and current_title:
+            parts = line.split("|", 1)
+            if len(parts) == 2:
+                step = parts[0].strip().strip("*- ")
+                expected = parts[1].strip().strip("*- ")
+                if step and expected and len(step) > 5:
+                    test_cases.append({
+                        "Test Case Title": current_title,
+                        "Steps to Reproduce": step,
+                        "Expected Result": expected,
+                        "Actual Result": "",
+                        "Status": "Not Executed"
+                    })
+    return test_cases
+
+
+def generate_csv(test_cases: list) -> bytes:
+    output = io.StringIO()
+    fieldnames = [
+        "Test Case Title",
+        "Steps to Reproduce",
+        "Expected Result",
+        "Actual Result",
+        "Status"
+    ]
+    writer = csv.DictWriter(output, fieldnames=fieldnames)
+    writer.writeheader()
+    prev_title = ""
+    for tc in test_cases:
+        row = {
+            "Test Case Title": tc["Test Case Title"]
+            if tc["Test Case Title"] != prev_title else "",
+            "Steps to Reproduce": tc.get("Steps to Reproduce", ""),
+            "Expected Result": tc.get("Expected Result", ""),
+            "Actual Result": tc.get("Actual Result", ""),
+            "Status": tc.get("Status", "Not Executed")
+        }
+        writer.writerow(row)
+        prev_title = tc["Test Case Title"]
+    return output.getvalue().encode("utf-8")
+
+
+# ===============================
+# 🖥️ SIDEBAR
+# ===============================
+st.sidebar.markdown("## 🧪 QA Assistant")
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📂 Upload Files")
+
+uploaded_files = st.sidebar.file_uploader(
+    "Screenshots, PDFs, Docs",
+    type=["txt", "pdf", "png", "jpg", "jpeg", "webp"],
+    accept_multiple_files=True
+)
+
+current_file_names = (
+    [f.name for f in uploaded_files] if uploaded_files else []
+)
+if current_file_names != st.session_state.prev_file_names:
+    st.session_state.images = []
+    st.session_state.file_text = ""
+    st.session_state.prev_file_names = current_file_names
+    if uploaded_files:
+        all_text = ""
+        for file in uploaded_files:
+            if file.type == "text/plain":
+                all_text += file.read().decode("utf-8") + "\n\n"
+            elif file.type == "application/pdf":
+                try:
+                    pdf_reader = PyPDF2.PdfReader(file)
+                    for page in pdf_reader.pages:
+                        text = page.extract_text()
+                        if text:
+                            all_text += text + "\n\n"
+                except Exception as e:
+                    st.sidebar.error(f"❌ {file.name}: {e}")
+            elif file.type in [
+                "image/png", "image/jpg",
+                "image/jpeg", "image/webp"
+            ]:
+                image = Image.open(file)
+                st.sidebar.image(
+                    image,
+                    caption=file.name,
+                    use_column_width=True
+                )
+                st.session_state.images.append(image)
+        st.session_state.file_text = all_text.strip()
+        if st.session_state.file_text:
+            st.sidebar.success("✅ Document loaded!")
+        if st.session_state.images:
+            st.sidebar.success(
+                f"✅ {len(st.session_state.images)} "
+                f"screenshot(s) loaded!")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### ⚡ Quick Actions")
+sidebar_action = None
+
+if st.sidebar.button(
+        "📋 Generate Test Cases", use_container_width=True):
+    sidebar_action = "generate_tc"
+if st.sidebar.button(
+        "🤖 Generate Selenium Code", use_container_width=True):
+    sidebar_action = "generate_selenium"
+if st.sidebar.button(
+        "🖼️ Analyze Screenshot", use_container_width=True):
+    sidebar_action = "analyze_screenshot"
+if st.sidebar.button(
+        "📝 BDD Scenarios", use_container_width=True):
+    sidebar_action = "generate_bdd"
+if st.sidebar.button(
+        "📄 Test Summary Report", use_container_width=True):
+    sidebar_action = "summary_report"
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📥 Downloads")
+if st.session_state.last_test_cases:
+    csv_data = generate_csv(st.session_state.last_test_cases)
+    st.sidebar.download_button(
+        label="📊 Download CSV",
+        data=csv_data,
+        file_name="test_cases.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
+else:
+    st.sidebar.info("Generate test cases to enable download")
+
+st.sidebar.markdown("---")
+if st.sidebar.button("🗑️ Clear All", use_container_width=True):
+    st.session_state.chat_history = []
+    st.session_state.images = []
+    st.session_state.file_text = ""
+    st.session_state.prev_file_names = []
+    st.session_state.last_test_cases = []
+    st.session_state.last_ac = ""
+    st.session_state.dashboard_data = None
+    st.rerun()
+
+
+# ===============================
+# 🖥️ MAIN AREA
+# ===============================
+col1, col2 = st.columns([2, 1])
+
+with col1:
+    st.markdown("### 📝 Paste Acceptance Criteria")
+    feature_name = st.text_input(
+        "Feature / Ticket Name",
+        placeholder=(
+            "e.g. Wishlist Extended Warranty, "
+            "Login Page, TC-1234"
+        )
+    )
+    ac_input = st.text_area(
+        "Acceptance Criteria",
+        height=220,
+        placeholder="""Paste your acceptance criteria here...
+
+Example:
+- User should be able to view Extended warranty label
+- User should be able to add product to wishlist
+- User should not be able to see label without login"""
     )
 
-    # ---- SYSTEM PROMPT (QA FOCUSED) ----
-    system_content = """You are an expert QA Engineer assistant with deep knowledge of:
-- Manual and automation testing
-- Test case design techniques
-- Bug reporting best practices
-- BDD/TDD methodologies
-- UI/UX testing
+with col2:
+    st.markdown("### 🚀 Generate")
+    st.markdown("<br>", unsafe_allow_html=True)
+    btn_tc = st.button(
+        "📋 Test Cases",
+        use_container_width=True,
+        type="primary"
+    )
+    st.markdown("<br>", unsafe_allow_html=True)
+    btn_selenium = st.button(
+        "🤖 Selenium Java",
+        use_container_width=True
+    )
+    st.markdown("<br>", unsafe_allow_html=True)
+    btn_bdd = st.button(
+        "📝 BDD Scenarios",
+        use_container_width=True
+    )
+    st.markdown("<br>", unsafe_allow_html=True)
+    btn_screenshot = st.button(
+        "🖼️ From Screenshot",
+        use_container_width=True
+    )
+    st.markdown("<br>", unsafe_allow_html=True)
+    btn_summary = st.button(
+        "📄 Summary Report",
+        use_container_width=True
+    )
 
-When generating test cases, ALWAYS use this format:
+st.divider()
+st.markdown("### 💬 Results")
 
-**TC_ID** | **Test Case Title**
-- **Description:** what is being tested
-- **Preconditions:** what needs to be set up first
-- **Test Steps:**
-  1. Step one
-  2. Step two
-  3. Step three
-- **Expected Result:** what should happen
-- **Priority:** High / Medium / Low
-- **Type:** Functional / UI / Negative / Edge Case
+for msg in st.session_state.chat_history:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-When analyzing screenshots:
-- Identify all UI elements (buttons, fields, dropdowns, etc.)
-- Note any visible text, labels, error messages
-- Suggest both positive and negative test cases
-- Include edge cases and boundary value tests
-- Consider accessibility and usability issues
-"""
 
+# ===============================
+# 🎯 ACTION HANDLER
+# ===============================
+def handle_action(
+        action_type: str,
+        ac_text: str = "",
+        feature: str = "Feature"):
+
+    # ---- GENERATE TEST CASES ----
+    if action_type == "generate_tc":
+        if not ac_text.strip():
+            st.warning(
+                "⚠️ Please paste Acceptance Criteria first!")
+            return
+        prompt = get_testcase_prompt(ac_text, feature)
+        user_msg = (
+            f"**📋 Generate Test Cases for:** {feature}"
+            f"\n\n**AC:**\n{ac_text}"
+        )
+        with st.chat_message("user"):
+            st.markdown(user_msg)
+        st.session_state.chat_history.append(
+            {"role": "user", "content": user_msg})
+        messages = [
+            {"role": "system", "content": (
+                "You are an expert Technical Test Lead. "
+                "EVERY test case MUST start with these "
+                "7 mandatory login steps EXACTLY as given. "
+                "Then add specific steps for each TC. "
+                "POSITIVE specific steps: "
+                "'User should be able to' / 'User is able to'. "
+                "NEGATIVE specific steps: "
+                "'User should not be able to' / "
+                "'User is not able to'. "
+                "Never skip the mandatory steps."
+            )},
+            {"role": "user", "content": prompt}
+        ]
+        with st.chat_message("assistant"):
+            with st.spinner("🔍 Generating test cases..."):
+                reply = call_groq(messages)
+            st.markdown(reply)
+            parsed = parse_test_cases_to_list(reply)
+            if parsed:
+                st.session_state.last_test_cases = parsed
+                st.session_state.last_ac = ac_text
+                csv_data = generate_csv(parsed)
+                st.download_button(
+                    label=f"📊 Download CSV ({len(parsed)} rows)",
+                    data=csv_data,
+                    file_name=(
+                        f"{feature.replace(' ', '_')}"
+                        f"_test_cases.csv"
+                    ),
+                    mime="text/csv"
+                )
+                dash = compute_dashboard(parsed, ac_text)
+                st.session_state.dashboard_data = (dash, feature)
+                show_dashboard(dash, feature)
+            else:
+                st.download_button(
+                    label="📊 Download Raw CSV",
+                    data=reply.encode("utf-8"),
+                    file_name="test_cases.csv",
+                    mime="text/csv"
+                )
+        st.session_state.chat_history.append(
+            {"role": "assistant", "content": reply})
+
+    # ---- GENERATE SELENIUM ----
+    elif action_type == "generate_selenium":
+        if not ac_text.strip():
+            st.warning(
+                "⚠️ Please paste Acceptance Criteria first!")
+            return
+        tc_context = "\n".join([
+            f"{tc['Test Case Title']} - "
+            f"{tc['Steps to Reproduce']}"
+            for tc in st.session_state.last_test_cases[:10]
+        ]) if st.session_state.last_test_cases else ""
+        prompt = get_selenium_prompt(ac_text, tc_context)
+        user_msg = (
+            f"**🤖 Generate Selenium Java Code for:** {feature}"
+        )
+        with st.chat_message("user"):
+            st.markdown(user_msg)
+        st.session_state.chat_history.append(
+            {"role": "user", "content": user_msg})
+        messages = [
+            {"role": "system", "content": (
+                "You are a Senior Selenium Automation Engineer. "
+                "Generate clean production-ready Java code "
+                "using TestNG and Page Object Model."
+            )},
+            {"role": "user", "content": prompt}
+        ]
+        with st.chat_message("assistant"):
+            with st.spinner("⚙️ Generating Selenium Java code..."):
+                reply = call_groq(messages)
+            st.markdown(reply)
+            st.download_button(
+                label="💾 Download .java file",
+                data=reply.encode("utf-8"),
+                file_name=(
+                    f"{feature.replace(' ', '_')}_selenium.java"
+                ),
+                mime="text/plain"
+            )
+        st.session_state.chat_history.append(
+            {"role": "assistant", "content": reply})
+
+    # ---- ANALYZE SCREENSHOT ----
+    elif action_type == "analyze_screenshot":
+        if not st.session_state.images:
+            st.warning(
+                "⚠️ Upload a screenshot from the sidebar first!")
+            return
+        prompt = get_screenshot_tc_prompt()
+        user_msg = (
+            "**🖼️ Analyze Screenshot — Generate Test Cases**"
+        )
+        with st.chat_message("user"):
+            st.markdown(user_msg)
+        st.session_state.chat_history.append(
+            {"role": "user", "content": user_msg})
+        messages = [
+            {"role": "system", "content": (
+                "You are an expert QA Engineer. "
+                "Analyze UI screenshots and generate test cases. "
+                "EVERY test case starts with 7 mandatory login steps. "
+                "POSITIVE: 'User should be able to' / 'User is able to'. "
+                "NEGATIVE: 'User should not be able to' / "
+                "'User is not able to'."
+            )},
+            {"role": "user", "content": prompt}
+        ]
+        with st.chat_message("assistant"):
+            with st.spinner("🔍 Analyzing screenshot..."):
+                reply = call_groq(
+                    messages,
+                    images=st.session_state.images
+                )
+            st.markdown(reply)
+            parsed = parse_test_cases_to_list(reply)
+            if parsed:
+                st.session_state.last_test_cases = parsed
+                csv_data = generate_csv(parsed)
+                st.download_button(
+                    label=f"📊 Download CSV ({len(parsed)} rows)",
+                    data=csv_data,
+                    file_name="screenshot_test_cases.csv",
+                    mime="text/csv"
+                )
+                dash = compute_dashboard(
+                    parsed, "Screenshot Analysis")
+                show_dashboard(dash, "Screenshot Analysis")
+        st.session_state.chat_history.append(
+            {"role": "assistant", "content": reply})
+
+    # ---- GENERATE BDD ----
+    elif action_type == "generate_bdd":
+        if not ac_text.strip():
+            st.warning(
+                "⚠️ Please paste Acceptance Criteria first!")
+            return
+        prompt = get_bdd_prompt(ac_text)
+        user_msg = f"**📝 BDD Scenarios for:** {feature}"
+        with st.chat_message("user"):
+            st.markdown(user_msg)
+        st.session_state.chat_history.append(
+            {"role": "user", "content": user_msg})
+        messages = [
+            {"role": "system", "content": (
+                "You are a BDD expert. "
+                "Generate clear comprehensive Gherkin scenarios."
+            )},
+            {"role": "user", "content": prompt}
+        ]
+        with st.chat_message("assistant"):
+            with st.spinner("📝 Generating BDD scenarios..."):
+                reply = call_groq(messages)
+            st.markdown(reply)
+            st.download_button(
+                label="💾 Download .feature file",
+                data=reply.encode("utf-8"),
+                file_name=(
+                    f"{feature.replace(' ', '_')}.feature"
+                ),
+                mime="text/plain"
+            )
+        st.session_state.chat_history.append(
+            {"role": "assistant", "content": reply})
+
+    # ---- SUMMARY REPORT ----
+    elif action_type == "summary_report":
+        if not st.session_state.last_test_cases:
+            st.warning("⚠️ Generate test cases first!")
+            return
+        prompt = get_summary_prompt(
+            st.session_state.last_test_cases, feature)
+        user_msg = (
+            f"**📄 Test Summary Report for:** {feature}"
+        )
+        with st.chat_message("user"):
+            st.markdown(user_msg)
+        st.session_state.chat_history.append(
+            {"role": "user", "content": user_msg})
+        messages = [
+            {"role": "system", "content": (
+                "You are a QA Test Lead writing professional "
+                "reports for QA Managers. "
+                "Be concise, accurate and professional."
+            )},
+            {"role": "user", "content": prompt}
+        ]
+        with st.chat_message("assistant"):
+            with st.spinner("📄 Generating summary report..."):
+                reply = call_groq(messages)
+            st.markdown(reply)
+            st.download_button(
+                label="💾 Download Report (.txt)",
+                data=reply.encode("utf-8"),
+                file_name=(
+                    f"{feature.replace(' ', '_')}_report.txt"
+                ),
+                mime="text/plain"
+            )
+        st.session_state.chat_history.append(
+            {"role": "assistant", "content": reply})
+
+
+# ===============================
+# 🎯 TRIGGER ALL BUTTONS
+# ===============================
+if btn_tc:
+    handle_action("generate_tc", ac_input, feature_name or "Feature")
+if btn_selenium:
+    handle_action(
+        "generate_selenium", ac_input, feature_name or "Feature")
+if btn_bdd:
+    handle_action(
+        "generate_bdd", ac_input, feature_name or "Feature")
+if btn_screenshot:
+    handle_action(
+        "analyze_screenshot", ac_input, feature_name or "Feature")
+if btn_summary:
+    handle_action(
+        "summary_report", ac_input, feature_name or "Feature")
+
+if sidebar_action == "generate_tc":
+    handle_action("generate_tc", ac_input, feature_name or "Feature")
+if sidebar_action == "generate_selenium":
+    handle_action(
+        "generate_selenium", ac_input, feature_name or "Feature")
+if sidebar_action == "analyze_screenshot":
+    handle_action(
+        "analyze_screenshot", ac_input, feature_name or "Feature")
+if sidebar_action == "generate_bdd":
+    handle_action(
+        "generate_bdd", ac_input, feature_name or "Feature")
+if sidebar_action == "summary_report":
+    handle_action(
+        "summary_report", ac_input, feature_name or "Feature")
+
+
+# ===============================
+# 💬 FREE CHAT
+# ===============================
+st.divider()
+user_prompt = st.chat_input(
+    "Ask anything about QA, testing, automation...")
+
+if user_prompt:
+    with st.chat_message("user"):
+        st.markdown(user_prompt)
+    st.session_state.chat_history.append(
+        {"role": "user", "content": user_prompt})
+
+    system_msg = (
+        "You are an expert QA Engineer and Technical Test Lead. "
+        "Help with test cases, Selenium Java, bug reports "
+        "and QA best practices. "
+        "POSITIVE: 'User should be able to' / 'User is able to'. "
+        "NEGATIVE: 'User should not be able to' / "
+        "'User is not able to'."
+    )
     if st.session_state.file_text:
-        system_content += f"""
+        system_msg += (
+            f"\n\nDoc context:\n"
+            f"{st.session_state.file_text[:4000]}"
+        )
+    if st.session_state.last_ac:
+        system_msg += (
+            f"\n\nPrevious AC:\n{st.session_state.last_ac}"
+        )
 
-You also have the following document content to reference:
-
---- DOCUMENT START ---
-{st.session_state.file_text[:6000]}
---- DOCUMENT END ---
-
-Use this document along with any screenshots to generate comprehensive test cases.
-"""
-
-    # ---- BUILD MESSAGES ----
-    api_messages = [{"role": "system", "content": system_content}]
-
-    history = st.session_state.chat_history[:-1]
-    if len(history) > 10:
-        history = history[-10:]
-    for msg in history:
+    api_messages = [{"role": "system", "content": system_msg}]
+    for msg in st.session_state.chat_history[-10:]:
         api_messages.append(msg)
 
-    api_messages.append({"role": "user", "content": active_prompt})
-
-    # ---- CALL GROQ ----
+    use_image = (
+        st.session_state.images and
+        any(w in user_prompt.lower() for w in [
+            "image", "screenshot", "screen",
+            "this", "describe", "analyze"
+        ])
+    )
     with st.chat_message("assistant"):
-        with st.spinner("Analyzing... 🔍"):
-            if use_image:
-                reply = call_groq(api_messages, images=st.session_state.images)
-            else:
-                reply = call_groq(api_messages)
+        with st.spinner("Thinking..."):
+            reply = call_groq(
+                api_messages,
+                images=(
+                    st.session_state.images if use_image else None
+                )
+            )
         st.markdown(reply)
-
-    st.session_state.chat_history.append({"role": "assistant", "content": reply})
-
+    st.session_state.chat_history.append(
+        {"role": "assistant", "content": reply})
