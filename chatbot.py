@@ -18,7 +18,7 @@ if not GROQ_KEY:
 
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
-    page_title="Rebin's QA Test Assistant Bot",
+    page_title="QA Test Assistant",
     page_icon="🧪",
     layout="wide"
 )
@@ -64,7 +64,7 @@ st.markdown("""
 
 st.markdown("""
 <div class="main-header">
-    <h1>🧪 Rebin's QA Test Assistant Bot</h1>
+    <h1>🧪 QA Test Assistant</h1>
     <p>AI-Powered Test Case Generator | Selenium Code | Coverage Analyzer</p>
 </div>
 """, unsafe_allow_html=True)
@@ -116,7 +116,8 @@ def call_groq(messages: list, images: list = None) -> str:
                             "url": f"data:image/jpeg;base64,{b64}"
                         }
                     })
-                api_messages.append({"role": "user", "content": content})
+                api_messages.append(
+                    {"role": "user", "content": content})
             else:
                 api_messages.append(msg)
     else:
@@ -202,7 +203,7 @@ def compute_dashboard(test_cases: list, ac_text: str) -> dict:
         "med": med,
         "coverage_pct": coverage_pct,
         "duplicates": duplicates,
-        "unique_titles": unique_titles[:5]
+        "unique_titles": unique_titles[:8]
     }
 
 
@@ -215,8 +216,7 @@ def generate_suggestions(data: dict) -> list:
     if data['coverage_pct'] < 80:
         suggestions.append(
             f"⚠️ Coverage is {data['coverage_pct']}%. "
-            "Some AC points may not be covered. "
-            "Review and add missing scenarios.")
+            "Some AC points may not be fully covered.")
     if data['total'] < 5:
         suggestions.append(
             "💡 Only a few steps generated. "
@@ -278,11 +278,9 @@ def show_dashboard(data: dict, feature: str):
     with col_left:
         st.markdown("#### 🎯 Coverage Breakdown")
         pos_pct = int(
-            (data['positive'] / max(data['total'], 1)) * 100
-        )
+            (data['positive'] / max(data['total'], 1)) * 100)
         neg_pct = int(
-            (data['negative'] / max(data['total'], 1)) * 100
-        )
+            (data['negative'] / max(data['total'], 1)) * 100)
         st.markdown(f"**Positive cases** — {pos_pct}%")
         st.progress(pos_pct / 100)
         st.markdown(f"**Negative cases** — {neg_pct}%")
@@ -336,7 +334,8 @@ def show_dashboard(data: dict, feature: str):
 # 📋 PROMPT TEMPLATES
 # ===============================
 def get_testcase_prompt(
-        ac_text: str, feature_name: str = "Feature") -> str:
+        ac_text: str,
+        feature_name: str = "Feature") -> str:
     return f"""Act as a Technical Test Lead and think about every \
 possible test case for the below Requirement.
 
@@ -364,55 +363,33 @@ STRICT LANGUAGE RULES FOR SPECIFIC STEPS:
 POSITIVE:
 - Column 2 MUST start with: "User should be able to..."
 - Column 3 MUST start with: "User is able to..."
-
 NEGATIVE:
 - Column 2 MUST start with: "User should not be able to..."
 - Column 3 MUST start with: "User is not able to..."
 
-COMPLETE EXAMPLE:
-Test Case Title: Verify whether user is able to view \
-"Extended warranty" label for the product in wishlist page
-Launch the following url "https://t1-aeg-qa-a.eluxmkt.com/der/de/b2b/pre-login/" | User should be able to launch the url
-User should be able to Partner link from the portal | User is able to Click on the partner link
-User should be able to Redirected to "Prelogin page" after clicking on the partner link from the portal | User is able to View the "Prelogin page"
-User should be able to Able to see "Login now", "Contact us" Buttons | User is able to View the "Login now", "Contact us" Buttons
-User should be able to "Login now" from prelogin page. | User is able to Click on the login now button
-User should be able to Redirected to "SAML login page" when clicking on "Login now" from prelogin page | User is able to User should be redirected to SAML login page
-User should be able to redirect to the Chiron page after the successful login credentials (Chiron user credentials) | User is able to View the login page
-User should be able to Navigate to Premier Line Sub-menu under Sales&Marketing | User is able to Navigate to Premier Line Sub-menu under Sales&Marketing
-User should be able to Add any Product to wishlist | User is able to Add any Product to wishlist
-User should be able to Navigate to Wishlist page | User is able to Navigate to Wishlist page
-User should be able to view "Extended warranty" label for the product | User is able to view "Extended warranty" label for the product
-
-Test Case Title: Verify whether user is not able to view \
-"Extended warranty" label without adding product to wishlist
-Launch the following url "https://t1-aeg-qa-a.eluxmkt.com/der/de/b2b/pre-login/" | User should be able to launch the url
-User should be able to Partner link from the portal | User is able to Click on the partner link
-User should be able to Redirected to "Prelogin page" after clicking on the partner link from the portal | User is able to View the "Prelogin page"
-User should be able to Able to see "Login now", "Contact us" Buttons | User is able to View the "Login now", "Contact us" Buttons
-User should be able to "Login now" from prelogin page. | User is able to Click on the login now button
-User should be able to Redirected to "SAML login page" when clicking on "Login now" from prelogin page | User is able to User should be redirected to SAML login page
-User should be able to redirect to the Chiron page after the successful login credentials (Chiron user credentials) | User is able to View the login page
-User should be able to Navigate to Wishlist page without adding product | User is able to Navigate to Wishlist page
-User should not be able to view "Extended warranty" label | User is not able to view "Extended warranty" label
-User should be able to see empty wishlist message | User is able to see empty wishlist message
-
-Now generate ALL test cases for the given AC.
-Each test case MUST have ALL 7 mandatory login steps first.
-Then add specific steps for that test case.
 Generate minimum 6-8 test cases (mix positive and negative).
 
-After all test cases provide CSV:
+YOUR RESPONSE FORMAT — VERY IMPORTANT:
+First show ONLY test case titles like this:
+
+✅ Generated Test Cases:
+1. Verify whether user is able to [title]
+2. Verify whether user is not able to [title]
+... and so on
+
+DO NOT show steps in chat. Steps go ONLY in CSV below.
+
+Then provide FULL details in CSV:
 ---CSV START---
 Test Case Title,Steps to Reproduce,Expected Result
 ---CSV END---
 
-Rules for CSV:
-- Same Test Case Title repeats for every step of that TC
-- Mandatory steps: exact text as shown
-- Positive specific steps: "User should be able to..." | "User is able to..."
-- Negative specific steps: "User should not be able to..." | "User is not able to..."
-- No extra commas inside cell text"""
+CSV Rules:
+- Same Test Case Title repeats for every step row
+- All 7 mandatory steps included for every TC
+- Positive: "User should be able to..." | "User is able to..."
+- Negative: "User should not be able to..." | "User is not able to..."
+- Full details ONLY in CSV not in chat"""
 
 
 def get_selenium_prompt(
@@ -431,23 +408,21 @@ Acceptance Criteria:
 {f"Test Cases context:{chr(10)}{tc_text}" if tc_text else ""}
 
 Generate:
-1. Page Object class with @FindBy WebElements and action methods
+1. Page Object class with @FindBy WebElements and methods
 2. TestNG Test class with @BeforeClass @Test @AfterClass
 3. Both positive and negative test methods
-4. Meaningful method names matching test case titles
-5. Login flow included in @BeforeClass or base setup
-6. Comments explaining each section"""
+4. Login flow in @BeforeClass setup
+5. Meaningful method names and comments"""
 
 
 def get_screenshot_tc_prompt() -> str:
     return """Act as a Technical Test Lead. \
 Analyze this UI screenshot carefully.
 
-Identify ALL UI elements visible:
+Identify ALL UI elements:
 - Buttons, input fields, dropdowns, checkboxes
 - Labels, text, error messages
 - Navigation items, links, menus
-- Forms, tables
 
 MANDATORY RULE — EVERY test case must start with \
 these EXACT 7 login steps:
@@ -463,11 +438,9 @@ Then add specific steps for each test case.
 POSITIVE: "User should be able to..." | "User is able to..."
 NEGATIVE: "User should not be able to..." | "User is not able to..."
 
-Format:
-Test Case Title: [title]
-[Step] | [Expected]
+Show ONLY titles in response.
+Full steps ONLY in CSV.
 
-After all test cases provide:
 ---CSV START---
 Test Case Title,Steps to Reproduce,Expected Result
 ---CSV END---"""
@@ -475,38 +448,35 @@ Test Case Title,Steps to Reproduce,Expected Result
 
 def get_bdd_prompt(ac_text: str) -> str:
     return f"""Act as a BDD Expert. \
-Convert the following AC into Gherkin format.
+Convert to Gherkin format.
 
 Acceptance Criteria:
 {ac_text}
 
-Generate scenarios covering positive and negative cases:
-
 Feature: [Feature Name]
 
   Background:
-    Given user navigates to the pre-login URL
+    Given user navigates to pre-login URL
     And user clicks Partner link
     And user is redirected to Prelogin page
     And user clicks Login now
-    And user is redirected to SAML login page
     And user logs in with Chiron credentials
 
   Scenario: [Positive scenario]
-    Given [specific precondition]
+    Given [precondition]
     When [action]
     Then [expected result]
 
   Scenario: [Negative scenario]
-    Given [specific precondition]
+    Given [precondition]
     When [invalid action]
-    Then [error expected result]"""
+    Then [error result]"""
 
 
 def get_summary_prompt(
         test_cases: list, feature: str) -> str:
     tc_text = "\n".join([
-        f"- {tc['Test Case Title']}: {tc['Steps to Reproduce']}"
+        f"- {tc['Test Case Title']}"
         for tc in test_cases[:20]
     ])
     return f"""As a QA Test Lead, write a professional \
@@ -518,14 +488,14 @@ Total Test Cases: {len(test_cases)}
 Test Cases:
 {tc_text}
 
-Write a professional report with:
+Write professional report with:
 1. Executive Summary (2-3 lines)
 2. Test Scope
 3. Test Approach
 4. Risk Areas Identified
 5. Recommendation
 
-Keep it concise and suitable for QA Manager review."""
+Concise and suitable for QA Manager review."""
 
 
 # ===============================
@@ -534,7 +504,6 @@ Keep it concise and suitable for QA Manager review."""
 def parse_test_cases_to_list(raw_text: str) -> list:
     test_cases = []
 
-    # Try CSV section first
     if "---CSV START---" in raw_text and "---CSV END---" in raw_text:
         csv_section = raw_text.split(
             "---CSV START---")[1].split("---CSV END---")[0].strip()
@@ -601,7 +570,8 @@ def generate_csv(test_cases: list) -> bytes:
         row = {
             "Test Case Title": tc["Test Case Title"]
             if tc["Test Case Title"] != prev_title else "",
-            "Steps to Reproduce": tc.get("Steps to Reproduce", ""),
+            "Steps to Reproduce": tc.get(
+                "Steps to Reproduce", ""),
             "Expected Result": tc.get("Expected Result", ""),
             "Actual Result": tc.get("Actual Result", ""),
             "Status": tc.get("Status", "Not Executed")
@@ -669,19 +639,24 @@ st.sidebar.markdown("### ⚡ Quick Actions")
 sidebar_action = None
 
 if st.sidebar.button(
-        "📋 Generate Test Cases", use_container_width=True):
+        "📋 Generate Test Cases",
+        use_container_width=True):
     sidebar_action = "generate_tc"
 if st.sidebar.button(
-        "🤖 Generate Selenium Code", use_container_width=True):
+        "🤖 Generate Selenium Code",
+        use_container_width=True):
     sidebar_action = "generate_selenium"
 if st.sidebar.button(
-        "🖼️ Analyze Screenshot", use_container_width=True):
+        "🖼️ Analyze Screenshot",
+        use_container_width=True):
     sidebar_action = "analyze_screenshot"
 if st.sidebar.button(
-        "📝 BDD Scenarios", use_container_width=True):
+        "📝 BDD Scenarios",
+        use_container_width=True):
     sidebar_action = "generate_bdd"
 if st.sidebar.button(
-        "📄 Test Summary Report", use_container_width=True):
+        "📄 Test Summary Report",
+        use_container_width=True):
     sidebar_action = "summary_report"
 
 st.sidebar.markdown("---")
@@ -699,7 +674,9 @@ else:
     st.sidebar.info("Generate test cases to enable download")
 
 st.sidebar.markdown("---")
-if st.sidebar.button("🗑️ Clear All", use_container_width=True):
+if st.sidebar.button(
+        "🗑️ Clear All",
+        use_container_width=True):
     st.session_state.chat_history = []
     st.session_state.images = []
     st.session_state.file_text = ""
@@ -716,23 +693,37 @@ if st.sidebar.button("🗑️ Clear All", use_container_width=True):
 col1, col2 = st.columns([2, 1])
 
 with col1:
-    st.markdown("### 📝 Paste Acceptance Criteria")
+    st.markdown("### 📝 Paste Ticket Details")
     feature_name = st.text_input(
-        "Feature / Ticket Name",
+        "🎫 Ticket Name",
         placeholder=(
-            "e.g. Wishlist Extended Warranty, "
-            "Login Page, TC-1234"
+            "e.g. Alternate Product - "
+            "PLP Reset Message in Header"
         )
     )
     ac_input = st.text_area(
-        "Acceptance Criteria",
-        height=220,
-        placeholder="""Paste your acceptance criteria here...
+        "📋 Paste Full Ticket Details Here "
+        "(User Story + Requirements + AC)",
+        height=300,
+        placeholder="""Paste everything here together...
 
-Example:
-- User should be able to view Extended warranty label
-- User should be able to add product to wishlist
-- User should not be able to see label without login"""
+Display PLP Reset message in header
+
+As a retail partner viewing alternative products
+I want to be able to easily navigate back to the product list page
+So that I can continue to discover products
+
+Requirements:
+* at the top of the PLP card section - message shown as per design
+* a link is also shown for the subcategory of the current product
+* when clicked, the subcategory PLP loads
+
+Acceptance Criteria:
+* Given a customer is viewing the PLP
+   * When the page is viewed with an alternative product
+   * Then an info message bar should be displayed above product grid
+   * "Showing products similar to: current product name"
+   * And a link to view all products in current product's category"""
     )
 
 with col2:
@@ -784,43 +775,68 @@ def handle_action(
     if action_type == "generate_tc":
         if not ac_text.strip():
             st.warning(
-                "⚠️ Please paste Acceptance Criteria first!")
+                "⚠️ Please paste ticket details first!")
             return
+
         prompt = get_testcase_prompt(ac_text, feature)
         user_msg = (
             f"**📋 Generate Test Cases for:** {feature}"
-            f"\n\n**AC:**\n{ac_text}"
+            f"\n\n**Details:**\n{ac_text[:300]}..."
         )
         with st.chat_message("user"):
             st.markdown(user_msg)
         st.session_state.chat_history.append(
             {"role": "user", "content": user_msg})
+
         messages = [
             {"role": "system", "content": (
                 "You are an expert Technical Test Lead. "
-                "EVERY test case MUST start with these "
-                "7 mandatory login steps EXACTLY as given. "
-                "Then add specific steps for each TC. "
-                "POSITIVE specific steps: "
-                "'User should be able to' / 'User is able to'. "
-                "NEGATIVE specific steps: "
-                "'User should not be able to' / "
-                "'User is not able to'. "
-                "Never skip the mandatory steps."
+                "In chat response show ONLY test case titles "
+                "as a numbered list — no steps in chat. "
+                "Put ALL full step details ONLY in CSV section. "
+                "EVERY test case MUST have 7 mandatory login "
+                "steps in CSV first, then specific steps. "
+                "POSITIVE: 'User should be able to' / "
+                "'User is able to'. "
+                "NEGATIVE: 'User should not be able to' / "
+                "'User is not able to'."
             )},
             {"role": "user", "content": prompt}
         ]
+
         with st.chat_message("assistant"):
             with st.spinner("🔍 Generating test cases..."):
                 reply = call_groq(messages)
-            st.markdown(reply)
+
+            # Show ONLY titles in chat
+            display_text = reply
+            if "---CSV START---" in reply:
+                display_text = reply.split(
+                    "---CSV START---")[0].strip()
+
+            st.markdown(display_text)
+
+            # Parse and download CSV
             parsed = parse_test_cases_to_list(reply)
             if parsed:
                 st.session_state.last_test_cases = parsed
                 st.session_state.last_ac = ac_text
                 csv_data = generate_csv(parsed)
+                unique_titles = list(dict.fromkeys(
+                    tc["Test Case Title"]
+                    for tc in parsed
+                    if tc.get("Test Case Title")
+                ))
+                st.success(
+                    f"✅ {len(unique_titles)} test cases generated! "
+                    f"Full steps + expected in CSV below."
+                )
                 st.download_button(
-                    label=f"📊 Download CSV ({len(parsed)} rows)",
+                    label=(
+                        f"📊 Download Excel CSV "
+                        f"({len(unique_titles)} TCs, "
+                        f"{len(parsed)} rows)"
+                    ),
                     data=csv_data,
                     file_name=(
                         f"{feature.replace(' ', '_')}"
@@ -829,7 +845,8 @@ def handle_action(
                     mime="text/csv"
                 )
                 dash = compute_dashboard(parsed, ac_text)
-                st.session_state.dashboard_data = (dash, feature)
+                st.session_state.dashboard_data = (
+                    dash, feature)
                 show_dashboard(dash, feature)
             else:
                 st.download_button(
@@ -838,18 +855,18 @@ def handle_action(
                     file_name="test_cases.csv",
                     mime="text/csv"
                 )
+
         st.session_state.chat_history.append(
-            {"role": "assistant", "content": reply})
+            {"role": "assistant", "content": display_text})
 
     # ---- GENERATE SELENIUM ----
     elif action_type == "generate_selenium":
         if not ac_text.strip():
             st.warning(
-                "⚠️ Please paste Acceptance Criteria first!")
+                "⚠️ Please paste ticket details first!")
             return
         tc_context = "\n".join([
-            f"{tc['Test Case Title']} - "
-            f"{tc['Steps to Reproduce']}"
+            f"{tc['Test Case Title']}"
             for tc in st.session_state.last_test_cases[:10]
         ]) if st.session_state.last_test_cases else ""
         prompt = get_selenium_prompt(ac_text, tc_context)
@@ -869,7 +886,7 @@ def handle_action(
             {"role": "user", "content": prompt}
         ]
         with st.chat_message("assistant"):
-            with st.spinner("⚙️ Generating Selenium Java code..."):
+            with st.spinner("⚙️ Generating Selenium Java..."):
                 reply = call_groq(messages)
             st.markdown(reply)
             st.download_button(
@@ -887,7 +904,7 @@ def handle_action(
     elif action_type == "analyze_screenshot":
         if not st.session_state.images:
             st.warning(
-                "⚠️ Upload a screenshot from the sidebar first!")
+                "⚠️ Upload a screenshot from sidebar first!")
             return
         prompt = get_screenshot_tc_prompt()
         user_msg = (
@@ -900,9 +917,11 @@ def handle_action(
         messages = [
             {"role": "system", "content": (
                 "You are an expert QA Engineer. "
-                "Analyze UI screenshots and generate test cases. "
-                "EVERY test case starts with 7 mandatory login steps. "
-                "POSITIVE: 'User should be able to' / 'User is able to'. "
+                "Show ONLY titles in chat response. "
+                "Full steps ONLY in CSV. "
+                "EVERY TC starts with 7 mandatory login steps. "
+                "POSITIVE: 'User should be able to' / "
+                "'User is able to'. "
                 "NEGATIVE: 'User should not be able to' / "
                 "'User is not able to'."
             )},
@@ -914,13 +933,29 @@ def handle_action(
                     messages,
                     images=st.session_state.images
                 )
-            st.markdown(reply)
+            display_text = reply
+            if "---CSV START---" in reply:
+                display_text = reply.split(
+                    "---CSV START---")[0].strip()
+            st.markdown(display_text)
             parsed = parse_test_cases_to_list(reply)
             if parsed:
                 st.session_state.last_test_cases = parsed
                 csv_data = generate_csv(parsed)
+                unique_titles = list(dict.fromkeys(
+                    tc["Test Case Title"]
+                    for tc in parsed
+                    if tc.get("Test Case Title")
+                ))
+                st.success(
+                    f"✅ {len(unique_titles)} test cases! "
+                    f"Download CSV for full details."
+                )
                 st.download_button(
-                    label=f"📊 Download CSV ({len(parsed)} rows)",
+                    label=(
+                        f"📊 Download CSV "
+                        f"({len(unique_titles)} TCs)"
+                    ),
                     data=csv_data,
                     file_name="screenshot_test_cases.csv",
                     mime="text/csv"
@@ -929,13 +964,13 @@ def handle_action(
                     parsed, "Screenshot Analysis")
                 show_dashboard(dash, "Screenshot Analysis")
         st.session_state.chat_history.append(
-            {"role": "assistant", "content": reply})
+            {"role": "assistant", "content": display_text})
 
     # ---- GENERATE BDD ----
     elif action_type == "generate_bdd":
         if not ac_text.strip():
             st.warning(
-                "⚠️ Please paste Acceptance Criteria first!")
+                "⚠️ Please paste ticket details first!")
             return
         prompt = get_bdd_prompt(ac_text)
         user_msg = f"**📝 BDD Scenarios for:** {feature}"
@@ -946,12 +981,12 @@ def handle_action(
         messages = [
             {"role": "system", "content": (
                 "You are a BDD expert. "
-                "Generate clear comprehensive Gherkin scenarios."
+                "Generate clear Gherkin scenarios."
             )},
             {"role": "user", "content": prompt}
         ]
         with st.chat_message("assistant"):
-            with st.spinner("📝 Generating BDD scenarios..."):
+            with st.spinner("📝 Generating BDD..."):
                 reply = call_groq(messages)
             st.markdown(reply)
             st.download_button(
@@ -968,7 +1003,8 @@ def handle_action(
     # ---- SUMMARY REPORT ----
     elif action_type == "summary_report":
         if not st.session_state.last_test_cases:
-            st.warning("⚠️ Generate test cases first!")
+            st.warning(
+                "⚠️ Generate test cases first!")
             return
         prompt = get_summary_prompt(
             st.session_state.last_test_cases, feature)
@@ -983,12 +1019,12 @@ def handle_action(
             {"role": "system", "content": (
                 "You are a QA Test Lead writing professional "
                 "reports for QA Managers. "
-                "Be concise, accurate and professional."
+                "Be concise and professional."
             )},
             {"role": "user", "content": prompt}
         ]
         with st.chat_message("assistant"):
-            with st.spinner("📄 Generating summary report..."):
+            with st.spinner("📄 Generating report..."):
                 reply = call_groq(messages)
             st.markdown(reply)
             st.download_button(
@@ -1004,10 +1040,11 @@ def handle_action(
 
 
 # ===============================
-# 🎯 TRIGGER ALL BUTTONS
+# 🎯 TRIGGER BUTTONS
 # ===============================
 if btn_tc:
-    handle_action("generate_tc", ac_input, feature_name or "Feature")
+    handle_action(
+        "generate_tc", ac_input, feature_name or "Feature")
 if btn_selenium:
     handle_action(
         "generate_selenium", ac_input, feature_name or "Feature")
@@ -1016,19 +1053,22 @@ if btn_bdd:
         "generate_bdd", ac_input, feature_name or "Feature")
 if btn_screenshot:
     handle_action(
-        "analyze_screenshot", ac_input, feature_name or "Feature")
+        "analyze_screenshot", ac_input,
+        feature_name or "Feature")
 if btn_summary:
     handle_action(
         "summary_report", ac_input, feature_name or "Feature")
 
 if sidebar_action == "generate_tc":
-    handle_action("generate_tc", ac_input, feature_name or "Feature")
+    handle_action(
+        "generate_tc", ac_input, feature_name or "Feature")
 if sidebar_action == "generate_selenium":
     handle_action(
         "generate_selenium", ac_input, feature_name or "Feature")
 if sidebar_action == "analyze_screenshot":
     handle_action(
-        "analyze_screenshot", ac_input, feature_name or "Feature")
+        "analyze_screenshot", ac_input,
+        feature_name or "Feature")
 if sidebar_action == "generate_bdd":
     handle_action(
         "generate_bdd", ac_input, feature_name or "Feature")
@@ -1052,7 +1092,7 @@ if user_prompt:
 
     system_msg = (
         "You are an expert QA Engineer and Technical Test Lead. "
-        "Help with test cases, Selenium Java, bug reports "
+        "Help with test cases, Selenium Java, bug reports, "
         "and QA best practices. "
         "POSITIVE: 'User should be able to' / 'User is able to'. "
         "NEGATIVE: 'User should not be able to' / "
@@ -1084,7 +1124,8 @@ if user_prompt:
             reply = call_groq(
                 api_messages,
                 images=(
-                    st.session_state.images if use_image else None
+                    st.session_state.images
+                    if use_image else None
                 )
             )
         st.markdown(reply)
