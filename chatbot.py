@@ -20,7 +20,6 @@ st.markdown("""
         text-align: center;
         font-size: 38px;
         font-weight: bold;
-        margin-bottom: 5px;
     }
     .subtitle {
         text-align: center;
@@ -49,34 +48,48 @@ st.markdown("""
 st.markdown("<div class='title'>🤖 Rebin's Chatbot</div>", unsafe_allow_html=True)
 st.markdown("<div class='subtitle'>Ask anything... I'm here to help 🚀</div>", unsafe_allow_html=True)
 
+# ---------- CLEAR CHAT ----------
+if st.button("🗑️ Clear Chat"):
+    st.session_state.chat_history = []
+    st.session_state.pop("file_text", None)
+    st.rerun()
+
 st.divider()
+
+# ===============================
+# 🔥 SIDEBAR MULTIPLE FILE UPLOAD
+# ===============================
+st.sidebar.header("📂 Upload Files")
+
+uploaded_files = st.sidebar.file_uploader(
+    "Upload files",
+    type=["txt", "pdf"],
+    accept_multiple_files=True   # 🔥 IMPORTANT
+)
+
+# ---------- HANDLE MULTIPLE FILES ----------
+if uploaded_files:
+    all_text = ""
+
+    for file in uploaded_files:
+        if file.type == "text/plain":
+            all_text += file.read().decode("utf-8") + "\n\n"
+
+        elif file.type == "application/pdf":
+            pdf_reader = PyPDF2.PdfReader(file)
+            for page in pdf_reader.pages:
+                all_text += page.extract_text() + "\n\n"
+
+    st.session_state.file_text = all_text
+    st.sidebar.success(f"✅ {len(uploaded_files)} files uploaded!")
+
+# ---------- SHOW STATUS ----------
+if "file_text" in st.session_state:
+    st.info("📄 Files loaded. Ask questions below.")
 
 # ---------- CHAT HISTORY ----------
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
-
-# ---------- FILE UPLOAD ----------
-uploaded_file = st.file_uploader("📄 Upload a file (txt or pdf)", type=["txt", "pdf"])
-
-# ---------- HANDLE FILE ----------
-if uploaded_file and "file_added" not in st.session_state:
-    file_text = ""
-
-    if uploaded_file.type == "text/plain":
-        file_text = uploaded_file.read().decode("utf-8")
-
-    elif uploaded_file.type == "application/pdf":
-        pdf_reader = PyPDF2.PdfReader(uploaded_file)
-        for page in pdf_reader.pages:
-            file_text += page.extract_text()
-
-    # ✅ ADD FILE INTO CHAT HISTORY (ONLY ONCE)
-    st.session_state.chat_history.append({
-        "role": "user",
-        "content": f"[FILE UPLOADED]\n{file_text}"
-    })
-
-    st.session_state.file_added = True
 
 # ---------- DISPLAY CHAT ----------
 for message in st.session_state.chat_history:
@@ -95,7 +108,6 @@ llm = ChatGroq(
 user_prompt = st.chat_input("Type your message...")
 
 if user_prompt:
-    # save user message
     st.session_state.chat_history.append({
         "role": "user",
         "content": user_prompt
@@ -103,22 +115,27 @@ if user_prompt:
 
     st.markdown(f"<div class='user-msg'>👤 {user_prompt}</div>", unsafe_allow_html=True)
 
-    # prepare messages
     messages = [
-        {"role": "system", "content": "You are a helpful assistant"},
-        *st.session_state.chat_history
+        {"role": "system", "content": "You are a helpful assistant"}
     ]
 
-    # loader
+    # 🔥 include ALL files content
+    if "file_text" in st.session_state:
+        messages.append({
+            "role": "user",
+            "content": f"Use these files:\n{st.session_state.file_text}"
+        })
+
+    messages += st.session_state.chat_history
+
     with st.spinner("Thinking... 🤔"):
         response = llm.invoke(messages)
 
-    assistant_response = response.content
+    reply = response.content
 
-    # save bot response
     st.session_state.chat_history.append({
         "role": "assistant",
-        "content": assistant_response
+        "content": reply
     })
 
-    st.markdown(f"<div class='bot-msg'>🤖 {assistant_response}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div class='bot-msg'>🤖 {reply}</div>", unsafe_allow_html=True)
