@@ -18,7 +18,7 @@ if not GROQ_KEY:
 
 # ---------- PAGE CONFIG ----------
 st.set_page_config(
-    page_title="QA Test Assistant",
+    page_title="Rebin's QA Test Assistant Bot",
     page_icon="🧪",
     layout="wide"
 )
@@ -64,7 +64,7 @@ st.markdown("""
 
 st.markdown("""
 <div class="main-header">
-    <h1>🧪 QA Test Assistant</h1>
+    <h1>🧪 Rebin's QA Test Assistant Bot</h1>
     <p>AI-Powered Test Case Generator | Selenium Code | Coverage Analyzer</p>
 </div>
 """, unsafe_allow_html=True)
