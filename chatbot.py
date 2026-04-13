@@ -334,13 +334,6 @@ def show_dashboard(data: dict, feature: str):
 # 📋 PROMPT TEMPLATES
 # ===============================
 
-# ---------------------------------------------------------------
-# FIX #1 — INTERMEDIATE NAVIGATION STEPS INSTRUCTION
-# This block is injected into BOTH the AC-based and screenshot-based
-# prompts so the LLM always generates 2-3 navigation / interaction
-# steps between the 7 mandatory login steps and the final
-# verification step.
-# ---------------------------------------------------------------
 INTERMEDIATE_STEPS_INSTRUCTION = """
 CRITICAL RULE — INTERMEDIATE NAVIGATION STEPS:
 After the 7 mandatory login steps and BEFORE the final verification/
@@ -491,7 +484,11 @@ First show ONLY test case titles like this:
 
 DO NOT show steps in chat. Steps go ONLY in CSV below.
 
-Then provide FULL details in CSV:
+Then provide FULL details in CSV format.
+IMPORTANT: The CSV MUST be properly formatted with exactly 3 columns.
+Each row must have: "Test Case Title","Steps to Reproduce","Expected Result"
+Use double quotes around each field if it contains commas.
+
 ---CSV START---
 Test Case Title,Steps to Reproduce,Expected Result
 ---CSV END---
@@ -564,29 +561,72 @@ Concise and suitable for QA Manager review."""
 def parse_test_cases_to_list(raw_text: str) -> list:
     test_cases = []
 
+    # METHOD 1: Parse CSV between markers
     if "---CSV START---" in raw_text and "---CSV END---" in raw_text:
         csv_section = raw_text.split(
             "---CSV START---")[1].split("---CSV END---")[0].strip()
         lines = csv_section.split("\n")
-        for line in lines[1:]:
+        for line in lines:
             line = line.strip()
             if not line:
                 continue
-            reader = csv.reader([line])
-            for parts in reader:
-                if len(parts) >= 3:
-                    test_cases.append({
-                        "Test Case Title": parts[0].strip(),
-                        "Steps to Reproduce": parts[1].strip(),
-                        "Expected Result": parts[2].strip(),
-                        "Actual Result": "",
-                        "Status": "Not Executed"
-                    })
+            if line.lower().startswith("test case title"):
+                continue
+            try:
+                reader = csv.reader([line])
+                for parts in reader:
+                    if len(parts) >= 3:
+                        title = parts[0].strip().strip('"')
+                        step = parts[1].strip().strip('"')
+                        expected = parts[2].strip().strip('"')
+                        if title and step and len(step) > 5:
+                            test_cases.append({
+                                "Test Case Title": title,
+                                "Steps to Reproduce": step,
+                                "Expected Result": expected,
+                                "Actual Result": "",
+                                "Status": "Not Executed"
+                            })
+            except Exception:
+                continue
         if test_cases:
             return test_cases
 
-    # Fallback parse
+    # METHOD 2: CSV without markers - detect header row
     lines = raw_text.split("\n")
+    csv_started = False
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        if (line.lower().startswith("test case title") and
+                "steps to reproduce" in line.lower()):
+            csv_started = True
+            continue
+        if csv_started:
+            if line.startswith("---"):
+                break
+            try:
+                reader = csv.reader([line])
+                for parts in reader:
+                    if len(parts) >= 3:
+                        title = parts[0].strip().strip('"')
+                        step = parts[1].strip().strip('"')
+                        expected = parts[2].strip().strip('"')
+                        if title and step and len(step) > 5:
+                            test_cases.append({
+                                "Test Case Title": title,
+                                "Steps to Reproduce": step,
+                                "Expected Result": expected,
+                                "Actual Result": "",
+                                "Status": "Not Executed"
+                            })
+            except Exception:
+                continue
+    if test_cases:
+        return test_cases
+
+    # METHOD 3: Pipe-delimited fallback
     current_title = ""
     for line in lines:
         line = line.strip()
@@ -639,6 +679,22 @@ def generate_csv(test_cases: list) -> bytes:
         writer.writerow(row)
         prev_title = tc["Test Case Title"]
     return output.getvalue().encode("utf-8")
+
+
+def extract_display_text(reply: str) -> str:
+    display_text = reply
+    if "---CSV START---" in reply:
+        display_text = reply.split("---CSV START---")[0].strip()
+    lines = display_text.split("\n")
+    clean_lines = []
+    for line in lines:
+        lower = line.strip().lower()
+        if (lower.startswith("test case title") and
+                "steps to reproduce" in lower):
+            break
+        clean_lines.append(line)
+    display_text = "\n".join(clean_lines).strip()
+    return display_text
 
 
 # ===============================
@@ -824,6 +880,61 @@ for msg in st.session_state.chat_history:
 
 
 # ===============================
+# 🎯 SHARED: Process and display test cases
+# ===============================
+def process_and_display_test_cases(reply: str, feature: str,
+                                   ac_text: str,
+                                   file_prefix: str = ""):
+    display_text = extract_display_text(reply)
+    st.markdown(display_text)
+
+    parsed = parse_test_cases_to_list(reply)
+
+    if parsed:
+        st.session_state.last_test_cases = parsed
+        st.session_state.last_ac = ac_text
+        csv_data = generate_csv(parsed)
+        unique_titles = list(dict.fromkeys(
+            tc["Test Case Title"]
+            for tc in parsed
+            if tc.get("Test Case Title")
+        ))
+        st.success(
+            f"✅ {len(unique_titles)} test cases generated! "
+            f"Full steps + expected in CSV below."
+        )
+        fname = feature.replace(' ', '_')
+        if file_prefix:
+            fname = f"{fname}_{file_prefix}"
+        st.download_button(
+            label=(
+                f"📊 Download Excel CSV "
+                f"({len(unique_titles)} TCs, "
+                f"{len(parsed)} rows)"
+            ),
+            data=csv_data,
+            file_name=f"{fname}_test_cases.csv",
+            mime="text/csv"
+        )
+        dash = compute_dashboard(parsed, ac_text)
+        st.session_state.dashboard_data = (dash, feature)
+        show_dashboard(dash, feature)
+    else:
+        st.warning(
+            "⚠️ Could not parse structured test cases. "
+            "Downloading raw output as fallback."
+        )
+        st.download_button(
+            label="📊 Download Raw Output",
+            data=reply.encode("utf-8"),
+            file_name="test_cases_raw.txt",
+            mime="text/plain"
+        )
+
+    return display_text
+
+
+# ===============================
 # 🎯 ACTION HANDLER
 # ===============================
 def handle_action(
@@ -873,54 +984,8 @@ def handle_action(
         with st.chat_message("assistant"):
             with st.spinner("🔍 Generating test cases..."):
                 reply = call_groq(messages)
-
-            # Show ONLY titles in chat
-            display_text = reply
-            if "---CSV START---" in reply:
-                display_text = reply.split(
-                    "---CSV START---")[0].strip()
-
-            st.markdown(display_text)
-
-            # Parse and download CSV
-            parsed = parse_test_cases_to_list(reply)
-            if parsed:
-                st.session_state.last_test_cases = parsed
-                st.session_state.last_ac = ac_text
-                csv_data = generate_csv(parsed)
-                unique_titles = list(dict.fromkeys(
-                    tc["Test Case Title"]
-                    for tc in parsed
-                    if tc.get("Test Case Title")
-                ))
-                st.success(
-                    f"✅ {len(unique_titles)} test cases generated! "
-                    f"Full steps + expected in CSV below."
-                )
-                st.download_button(
-                    label=(
-                        f"📊 Download Excel CSV "
-                        f"({len(unique_titles)} TCs, "
-                        f"{len(parsed)} rows)"
-                    ),
-                    data=csv_data,
-                    file_name=(
-                        f"{feature.replace(' ', '_')}"
-                        f"_test_cases.csv"
-                    ),
-                    mime="text/csv"
-                )
-                dash = compute_dashboard(parsed, ac_text)
-                st.session_state.dashboard_data = (
-                    dash, feature)
-                show_dashboard(dash, feature)
-            else:
-                st.download_button(
-                    label="📊 Download Raw CSV",
-                    data=reply.encode("utf-8"),
-                    file_name="test_cases.csv",
-                    mime="text/csv"
-                )
+            display_text = process_and_display_test_cases(
+                reply, feature, ac_text)
 
         st.session_state.chat_history.append(
             {"role": "assistant", "content": display_text})
@@ -967,8 +1032,6 @@ def handle_action(
             {"role": "assistant", "content": reply})
 
     # ---- ANALYZE SCREENSHOT ----
-    # FIX #2 & #3: Screenshot now gets same CSV format,
-    # dashboard, and shows only titles first
     elif action_type == "analyze_screenshot":
         if not st.session_state.images:
             st.warning(
@@ -999,6 +1062,9 @@ def handle_action(
                 "NEVER jump directly from login step 7 to the "
                 "verification step — there MUST be navigation "
                 "steps in between. "
+                "The CSV MUST be properly formatted with "
+                "exactly 3 columns separated by commas. "
+                "Use double quotes around fields containing commas. "
                 "POSITIVE: 'User should be able to' / "
                 "'User is able to'. "
                 "NEGATIVE: 'User should not be able to' / "
@@ -1012,64 +1078,13 @@ def handle_action(
                     messages,
                     images=st.session_state.images
                 )
-
-            # FIX #3: Show ONLY verification titles first
-            display_text = reply
-            if "---CSV START---" in reply:
-                display_text = reply.split(
-                    "---CSV START---")[0].strip()
-            st.markdown(display_text)
-
-            # FIX #2: Same CSV download + dashboard as
-            # generate_tc action
-            parsed = parse_test_cases_to_list(reply)
-            if parsed:
-                st.session_state.last_test_cases = parsed
-                st.session_state.last_ac = (
-                    "Screenshot Analysis"
-                )
-                csv_data = generate_csv(parsed)
-                unique_titles = list(dict.fromkeys(
-                    tc["Test Case Title"]
-                    for tc in parsed
-                    if tc.get("Test Case Title")
-                ))
-                st.success(
-                    f"✅ {len(unique_titles)} test cases "
-                    f"generated from screenshot! "
-                    f"Full steps + expected in CSV below."
-                )
-                st.download_button(
-                    label=(
-                        f"📊 Download Excel CSV "
-                        f"({len(unique_titles)} TCs, "
-                        f"{len(parsed)} rows)"
-                    ),
-                    data=csv_data,
-                    file_name=(
-                        f"{feature.replace(' ', '_')}"
-                        f"_screenshot_test_cases.csv"
-                    ),
-                    mime="text/csv"
-                )
-                # FIX #2: Show dashboard same as generate_tc
-                dash = compute_dashboard(
-                    parsed, f"{feature} (Screenshot)")
-                st.session_state.dashboard_data = (
-                    dash, f"{feature} (Screenshot)")
-                show_dashboard(
-                    dash, f"{feature} (Screenshot)")
-            else:
-                st.warning(
-                    "⚠️ Could not parse structured test cases "
-                    "from response. Downloading raw output."
-                )
-                st.download_button(
-                    label="📊 Download Raw CSV",
-                    data=reply.encode("utf-8"),
-                    file_name="screenshot_test_cases.csv",
-                    mime="text/csv"
-                )
+            screenshot_ac = ac_text if ac_text.strip() else "Screenshot Analysis"
+            display_text = process_and_display_test_cases(
+                reply,
+                f"{feature} (Screenshot)",
+                screenshot_ac,
+                file_prefix="screenshot"
+            )
 
         st.session_state.chat_history.append(
             {"role": "assistant", "content": display_text})
