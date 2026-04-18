@@ -38,7 +38,7 @@ st.markdown("""
         border: 1px solid #e0e0e0;
     }
     .metric-num { font-size: 32px; font-weight: 700; }
-    .metric-lbl { font-size: 13px; color: #666; margin-top: 4px; }
+    .metric-lbl { font-size: 13px; color: #444 !important; margin-top: 4px; }
     .badge-high { background:#ffe0e0; color:#c00;
         padding:2px 8px; border-radius:99px; font-size:11px; }
     .badge-med { background:#fff3cd; color:#856404;
@@ -53,11 +53,15 @@ st.markdown("""
         background: #e8f4fd; border-left: 4px solid #185FA5;
         padding: 10px 14px; border-radius: 0 8px 8px 0;
         font-size: 14px; margin: 8px 0;
+        color: #0a2540 !important;
+        font-weight: 500 !important;
     }
     .duplicate-alert {
         background: #fff3cd; border-left: 4px solid #ffc107;
         padding: 10px 14px; border-radius: 0 8px 8px 0;
         font-size: 14px; margin: 8px 0;
+        color: #4a3800 !important;
+        font-weight: 500 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -152,33 +156,46 @@ def call_groq(messages: list, images: list = None) -> str:
 
 
 # ===============================
-# 📊 DASHBOARD FUNCTIONS
+# 📊 DASHBOARD FUNCTIONS — FIXED!
 # ===============================
 def compute_dashboard(test_cases: list, ac_text: str) -> dict:
-    total = len(test_cases)
-    positive = sum(
-        1 for tc in test_cases
-        if "should be able to" in tc.get(
-            "Steps to Reproduce", "").lower()
-        and "should not" not in tc.get(
-            "Steps to Reproduce", "").lower()
-    )
-    negative = sum(
-        1 for tc in test_cases
-        if "should not be able to" in tc.get(
-            "Steps to Reproduce", "").lower()
-    )
+
+    # Get unique titles first
     unique_titles = list(dict.fromkeys(
         tc["Test Case Title"] for tc in test_cases
         if tc.get("Test Case Title")
     ))
-    high = sum(1 for t in unique_titles if len(t) > 30)
+
+    # Count positive by TITLE not steps!
+    positive = sum(
+        1 for title in unique_titles
+        if "not able" not in title.lower()
+        and "should not" not in title.lower()
+        and "unable" not in title.lower()
+        and "invalid" not in title.lower()
+    )
+
+    # Count negative by TITLE not steps!
+    negative = sum(
+        1 for title in unique_titles
+        if "not able" in title.lower()
+        or "should not" in title.lower()
+        or "unable" in title.lower()
+        or "invalid" in title.lower()
+    )
+
+    # Priority based on keywords not title length!
+    high = sum(
+        1 for t in unique_titles
+        if any(word in t.lower() for word in [
+            "login", "security", "payment",
+            "critical", "error", "not able",
+            "invalid", "fail", "unable"
+        ])
+    )
     med = max(0, len(unique_titles) - high)
-    steps = [
-        tc.get("Steps to Reproduce", "").lower().strip()
-        for tc in test_cases
-    ]
-    duplicates = len(steps) - len(set(steps))
+
+    # AC Coverage
     ac_lines = [
         l.strip() for l in ac_text.split("\n")
         if l.strip() and len(l.strip()) > 10
@@ -200,8 +217,16 @@ def compute_dashboard(test_cases: list, ac_text: str) -> dict:
     coverage_pct = int(
         (covered / max(len(ac_lines), 1)) * 100
     )
+
+    # Duplicates check by title
+    all_titles = [
+        tc.get("Test Case Title", "")
+        for tc in test_cases
+    ]
+    duplicates = len(all_titles) - len(set(all_titles))
+
     return {
-        "total": total,
+        "total": len(unique_titles),
         "positive": positive,
         "negative": negative,
         "unique_tcs": len(unique_titles),
@@ -254,7 +279,7 @@ def show_dashboard(data: dict, feature: str):
             <div class="metric-num" style="color:#3B6D11">
                 {data['positive']}
             </div>
-            <div class="metric-lbl">Positive Steps</div>
+            <div class="metric-lbl">Positive Test Cases</div>
         </div>""", unsafe_allow_html=True)
     with c3:
         st.markdown(f"""
@@ -262,7 +287,7 @@ def show_dashboard(data: dict, feature: str):
             <div class="metric-num" style="color:#A32D2D">
                 {data['negative']}
             </div>
-            <div class="metric-lbl">Negative Steps</div>
+            <div class="metric-lbl">Negative Test Cases</div>
         </div>""", unsafe_allow_html=True)
     with c4:
         color = (
@@ -567,7 +592,6 @@ Concise and suitable for QA Manager review."""
 def parse_test_cases_to_list(raw_text: str) -> list:
     test_cases = []
 
-    # METHOD 1: Parse CSV between markers
     if "---CSV START---" in raw_text and "---CSV END---" in raw_text:
         csv_section = raw_text.split(
             "---CSV START---")[1].split("---CSV END---")[0].strip()
@@ -598,7 +622,6 @@ def parse_test_cases_to_list(raw_text: str) -> list:
         if test_cases:
             return test_cases
 
-    # METHOD 2: CSV without markers - detect header row
     lines = raw_text.split("\n")
     csv_started = False
     for line in lines:
@@ -632,7 +655,6 @@ def parse_test_cases_to_list(raw_text: str) -> list:
     if test_cases:
         return test_cases
 
-    # METHOD 3: Pipe-delimited fallback
     current_title = ""
     for line in lines:
         line = line.strip()
@@ -894,7 +916,6 @@ for msg in st.session_state.chat_history:
 def process_and_display_test_cases(reply: str, feature: str,
                                    ac_text: str,
                                    file_prefix: str = ""):
-    # Save to session state so it persists on rerun
     st.session_state.last_reply = reply
     st.session_state.last_feature = feature
     st.session_state.last_file_prefix = file_prefix
@@ -956,7 +977,6 @@ def handle_action(
         ac_text: str = "",
         feature: str = "Feature"):
 
-    # ---- GENERATE TEST CASES ----
     if action_type == "generate_tc":
         if not ac_text.strip():
             st.warning(
@@ -1004,7 +1024,6 @@ def handle_action(
         st.session_state.chat_history.append(
             {"role": "assistant", "content": display_text})
 
-    # ---- GENERATE SELENIUM ----
     elif action_type == "generate_selenium":
         if not ac_text.strip():
             st.warning(
@@ -1045,7 +1064,6 @@ def handle_action(
         st.session_state.chat_history.append(
             {"role": "assistant", "content": reply})
 
-    # ---- ANALYZE SCREENSHOT (TWO-STEP FIX) ----
     elif action_type == "analyze_screenshot":
         if not st.session_state.images:
             st.warning(
@@ -1060,7 +1078,6 @@ def handle_action(
             {"role": "user", "content": user_msg})
 
         with st.chat_message("assistant"):
-            # STEP 1: Vision model ONLY describes UI elements
             with st.spinner(
                     "🔍 Step 1/2: Analyzing screenshot..."):
                 vision_messages = [
@@ -1092,7 +1109,6 @@ def handle_action(
                      "content": ui_description})
                 return
 
-            # STEP 2: Text model generates proper CSV
             with st.spinner(
                     "📋 Step 2/2: Generating test cases..."):
                 tc_prompt = get_testcase_prompt(
@@ -1120,7 +1136,6 @@ def handle_action(
                     )},
                     {"role": "user", "content": tc_prompt}
                 ]
-                # Higher token limit for screenshot CSV
                 try:
                     headers = {
                         "Authorization": f"Bearer {GROQ_KEY}",
@@ -1155,7 +1170,6 @@ def handle_action(
         st.session_state.chat_history.append(
             {"role": "assistant", "content": display_text})
 
-    # ---- GENERATE BDD ----
     elif action_type == "generate_bdd":
         if not ac_text.strip():
             st.warning(
@@ -1189,7 +1203,6 @@ def handle_action(
         st.session_state.chat_history.append(
             {"role": "assistant", "content": reply})
 
-    # ---- SUMMARY REPORT ----
     elif action_type == "summary_report":
         if not st.session_state.last_test_cases:
             st.warning(
